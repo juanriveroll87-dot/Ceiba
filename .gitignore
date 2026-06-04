@@ -1,0 +1,12 @@
+# Recon / scraper outputs
+recon_out/
+output/
+pdfs/
+*.csv
+*.json.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
