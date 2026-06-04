@@ -28,9 +28,10 @@ pip install -r requirements.txt
 
 python reca_scraper.py                 # listado: CSV/JSON + match + resumen (rápido)
 python reca_scraper.py --pdfs          # + descarga Condiciones Generales de los match
+python reca_scraper.py --pdfs --pdf-scope all   # CG de TODO Vida (para análisis de contenido)
 python reca_scraper.py --enrich all    # + estatus/CNSF/documentos de TODO Vida (lento)
 python reca_scraper.py --pdfs --pdf-types "condiciones generales,caratula"
-python reca_scraper.py --pdf-types all # baja todos los documentos de los match
+python reca_scraper.py --terms "orfandad,huerfan,educac,beca,renta"   # ajusta el match
 ```
 
 ## Salidas (`./output`)

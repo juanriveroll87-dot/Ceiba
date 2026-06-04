@@ -79,9 +79,10 @@ HEADERS = {
 }
 
 # Términos a marcar (orfandad / continuidad educativa / Vida Grupo Deudores).
+# Términos objetivo (normalizados, sin acentos). Se pueden sobreescribir con --terms.
 TARGET_TERMS = [
-    "orfandad", "escolar", "educativ", "beca",
-    "colegiatura", "estudia", "deudores", "continuidad",
+    "orfandad", "huerfan", "escolar", "educativ", "educac", "beca",
+    "colegiatura", "estudia", "continuidad", "supervivencia", "deudores",
 ]
 
 # Posiciones de columnas en cada fila de busqueda.php -> data[]
@@ -473,20 +474,34 @@ def main() -> None:
     ap.add_argument("--enrich", choices=["none", "match", "all"], default="none",
                     help="Pedir la tarjeta para añadir estatus/CNSF/documentos.")
     ap.add_argument("--pdfs", action="store_true",
-                    help="Descargar PDFs de los contratos con match (implica enrich=match).")
+                    help="Descargar PDFs (implica enrich del scope elegido).")
+    ap.add_argument("--pdf-scope", choices=["match", "all"], default="match",
+                    help="De qué contratos bajar PDFs: solo match (default) o todo Vida.")
     ap.add_argument("--pdf-types", default="condiciones generales",
                     help='Tipos de documento a bajar (coma) o "all". '
                          'Claves: condiciones generales, caratula, solicitud, endosos.')
+    ap.add_argument("--terms", default="",
+                    help="Sobrescribe los términos de match (coma). Ej: "
+                         '"orfandad,educac,beca,renta". Por defecto usa la lista interna.')
     args = ap.parse_args()
 
     out_dir = Path(args.out)
     setup_logging(out_dir)
 
+    if args.terms.strip():
+        global TARGET_TERMS
+        TARGET_TERMS = [normalize(t) for t in args.terms.split(",") if t.strip()]
+        log.info("Términos de match (override): %s", ", ".join(TARGET_TERMS))
+
     enrich = args.enrich
-    if args.pdfs and enrich == "none":
-        enrich = "match"
-    log.info("Scraper RECAS/Vida | limit=%d delay=%.1fs enrich=%s pdfs=%s",
-             args.limit, args.delay, enrich, args.pdfs)
+    if args.pdfs:
+        # Para bajar PDFs hay que enriquecer (obtener los tokens) ese mismo scope.
+        if args.pdf_scope == "all":
+            enrich = "all"
+        elif enrich == "none":
+            enrich = "match"
+    log.info("Scraper RECAS/Vida | limit=%d delay=%.1fs enrich=%s pdfs=%s scope=%s",
+             args.limit, args.delay, enrich, args.pdfs, args.pdf_scope)
 
     with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
         contratos = scrape_vida(client, args.limit, args.delay)
@@ -507,11 +522,11 @@ def main() -> None:
         if args.pdfs:
             pdf_types = {normalize(t).strip().replace(" ", "_")
                          for t in args.pdf_types.split(",")}
-            # normaliza "condiciones generales" -> "condiciones_generales"
             pdf_types = {"all"} if "all" in pdf_types else pdf_types
-            objetivo = [c for c in contratos if c["match"]]
-            log.info("Descargando PDFs (%s) de %d contratos con match...",
-                     args.pdf_types, len(objetivo))
+            objetivo = contratos if args.pdf_scope == "all" else \
+                [c for c in contratos if c["match"]]
+            log.info("Descargando PDFs (%s) de %d contratos (scope=%s)...",
+                     args.pdf_types, len(objetivo), args.pdf_scope)
             download_documents(client, objetivo, pdf_types, args.delay)
 
     print_summary(contratos)
