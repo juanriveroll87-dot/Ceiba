@@ -47,19 +47,28 @@ def extract_text(path: Path, max_pages: int) -> str:
     try:
         from pypdf import PdfReader  # import perezoso: solo se necesita al leer PDFs
     except ImportError:
-        raise SystemExit("Falta pypdf. Instala con:  pip install pypdf")
+        raise SystemExit(
+            "Falta pypdf. Instala con:  pip install pypdf cryptography")
     try:
         reader = PdfReader(str(path))
+        # Los PDFs de CONDUSEF suelen venir cifrados (AES) con contraseña vacía.
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("")
+            except Exception as exc:
+                print(f"  ! cifrado, no pude descifrar {path.name}: {exc} "
+                      f"(¿falta 'pip install cryptography'?)")
+                return ""
+        parts = []
+        for page in reader.pages[:max_pages]:
+            try:
+                parts.append(page.extract_text() or "")
+            except Exception:
+                continue
+        return "\n".join(parts)
     except Exception as exc:
-        print(f"  ! no pude abrir {path.name}: {exc}")
+        print(f"  ! no pude leer {path.name}: {exc}")
         return ""
-    parts = []
-    for page in reader.pages[:max_pages]:
-        try:
-            parts.append(page.extract_text() or "")
-        except Exception:
-            continue
-    return "\n".join(parts)
 
 
 def main() -> None:
