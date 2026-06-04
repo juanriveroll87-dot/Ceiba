@@ -36,6 +36,8 @@ Flags útiles:
   --seconds N      en vez de esperar ENTER, graba N segundos y termina
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys

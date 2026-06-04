@@ -46,6 +46,8 @@ Uso:
   python reca_scraper.py --enrich all
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
