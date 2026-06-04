@@ -41,10 +41,17 @@ python recon_reca.py --headless      # sin ventana
 
 De la carpeta `recon_out/`, mándame especialmente:
 
-- **`xhr_endpoints.json`** → los XHR/fetch y respuestas JSON detectadas (aquí
-  debe estar el endpoint de contratos: método, URL, headers, payload, cuerpo).
-- **`form_structure.json`** → los `<select>` y sus opciones (valores de
-  `sistema`, `ramo`, instituciones, etc.) que el scraper necesitará mandar.
+- **`recon_out/js/`** → todo el JavaScript de la app (lo descarga solo). **Aquí
+  está cómo se construyen las URLs de los PDFs / el endpoint de detalle.** Es lo
+  más importante para habilitar la descarga de documentos.
+- **`documentos_candidatos.json`** → recursos no-XHR que parecen documentos/PDFs
+  o detalle (por si al hacer clic en un contrato se abre un PDF).
+- `xhr_endpoints.json` → XHR/fetch y respuestas JSON (endpoint de contratos).
+- `form_structure.json` → `<select>` y sus opciones.
 
-Con eso valido el enfoque y escribo el scraper completo (httpx + fallback
-Playwright, CSV/JSON, match de términos y descarga de PDFs).
+### Para cazar las URLs de documentos
+
+Al correr el recon, además de la búsqueda, **haz clic en un contrato** para abrir
+su detalle y, si aparecen, **haz clic en un documento** (condiciones generales).
+El JS volcado en `recon_out/js/` normalmente ya revela el patrón aunque no hagas
+clic, pero el clic ayuda a confirmarlo.

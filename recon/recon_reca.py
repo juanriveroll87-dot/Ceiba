@@ -168,6 +168,12 @@ def main() -> None:
         except Exception as exc:
             print(f"[recon] No pude volcar estructura del formulario: {exc}")
 
+        # --- Volcado del JavaScript de la app (clave para las URLs de PDFs) ---
+        try:
+            _dump_scripts(page, context)
+        except Exception as exc:
+            print(f"[recon] No pude volcar el JS: {exc}")
+
         # --- Intento automático best-effort (opcional) ---
         if args.auto:
             try:
@@ -200,6 +206,41 @@ def main() -> None:
         browser.close()
 
     _dump_and_summarize(entries)
+
+
+def _dump_scripts(page, context) -> None:
+    """Descarga todos los <script src> del mismo origen + scripts inline.
+
+    El JS de la app contiene cómo se construyen las URLs de los documentos
+    (condiciones generales, carátula, etc.), así que es la vía más fiable para
+    descubrir el patrón sin depender de clics.
+    """
+    js_dir = OUT / "js"
+    js_dir.mkdir(exist_ok=True)
+    info = page.evaluate(
+        """() => {
+            const ext = [...document.scripts].filter(s => s.src).map(s => s.src);
+            const inline = [...document.scripts].filter(s => !s.src)
+                .map(s => s.textContent).filter(t => t && t.trim());
+            return {ext, inline};
+        }"""
+    )
+    saved = 0
+    for url in info["ext"]:
+        # Solo same-origin (los CDNs externos no nos interesan y pueden fallar).
+        if "condusef.gob.mx" not in url:
+            continue
+        try:
+            resp = context.request.get(url, timeout=30_000)
+            name = url.split("/")[-1].split("?")[0] or f"script_{saved}.js"
+            (js_dir / name).write_bytes(resp.body())
+            saved += 1
+        except Exception as exc:
+            print(f"[recon]   no pude bajar {url}: {exc}")
+    for i, code in enumerate(info["inline"]):
+        (js_dir / f"inline_{i}.js").write_text(code, encoding="utf-8")
+    print(f"[recon] JS volcado -> {js_dir}/ ({saved} externos same-origin, "
+          f"{len(info['inline'])} inline). Mándame estos archivos.")
 
 
 def _best_effort_recas_vida(page) -> None:
@@ -255,6 +296,27 @@ def _dump_and_summarize(entries: list[dict]) -> None:
     (OUT / "xhr_endpoints.json").write_text(
         json.dumps(interesting, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+    # Recursos que NO son XHR/fetch/JSON pero pueden ser documentos/PDFs
+    # (al hacer clic en un contrato el PDF puede abrirse como navegación).
+    docs = [
+        e for e in entries
+        if "condusef.gob.mx" in e["url"]
+        and not looks_interesting(e)
+        and (
+            "pdf" in (e.get("response_content_type") or "").lower()
+            or e["url"].lower().endswith(".pdf")
+            or e.get("resource_type") == "document"
+            or any(k in e["url"].lower()
+                   for k in ("detalle", "documento", "doc", "pdf", "archivo", "file"))
+        )
+    ]
+    (OUT / "documentos_candidatos.json").write_text(
+        json.dumps(docs, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    if docs:
+        print(f"[recon] Posibles documentos/detalle -> documentos_candidatos.json "
+              f"({len(docs)})")
 
     print("\n" + "=" * 70)
     print(f"RECON COMPLETO. Requests totales: {len(entries)} | "
