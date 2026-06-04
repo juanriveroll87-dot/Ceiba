@@ -223,35 +223,91 @@ def row_to_contract(row: list, ramo_consulta: str) -> dict:
     }
 
 
-def fetch_ramo(client, ramo, limit, delay) -> list[dict]:
-    out, page = [], 1
+def _page_query(client, params, limit, delay, ramo_label, max_pages=1000):
+    """Pagina busqueda.php para un conjunto de filtros. Devuelve (contratos, truncado).
+
+    El backend reporta total/total_pages de forma poco fiable (suele decir
+    total_pages=1 aunque haya más), así que NO confiamos en ellos: paginamos
+    mientras la página venga llena (== limit) y aporte registros nuevos. Cortamos
+    en página parcial (< limit, fin normal). Si la página viene llena pero no
+    aporta nada nuevo, asumimos que el servidor ignora 'page' y marcamos truncado.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    page = 1
+    truncado = False
     while True:
+        if page > max_pages:
+            truncado = True
+            break
         data = get_json(client, "busqueda.php", {
-            "sector": SECTOR, "search_type": "advanced",
-            "ramo": ramo, "page": page, "limit": limit,
+            **params, "page": page, "limit": limit,
         }, delay)
         if not data or not data.get("success"):
-            log.warning("Ramo '%s' pág %d sin datos; corto.", ramo, page)
+            log.warning("Ramo '%s' pág %d sin datos; corto.", ramo_label, page)
             break
         rows = data.get("data") or []
-        out.extend(row_to_contract(r, ramo) for r in rows)
-        total_pages = data.get("total_pages") or 1
-        if page == 1:
-            log.info("Ramo '%s': total=%s, páginas=%s",
-                     ramo, data.get("total"), total_pages)
-        if page >= total_pages or not rows:
+        nuevos = 0
+        for r in rows:
+            c = row_to_contract(r, ramo_label)
+            key = c["numero_registro"] or f"{ramo_label}|{c['nombre_comercial']}|{len(out)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+            nuevos += 1
+        if len(rows) < limit:            # última página (parcial o vacía): fin
+            break
+        if nuevos == 0:                  # 'page' sin efecto: posible truncamiento
+            truncado = True
             break
         page += 1
+    return out, truncado
+
+
+def fetch_ramo(client, ramo, limit, delay):
+    params = {"sector": SECTOR, "search_type": "advanced", "ramo": ramo}
+    out, truncado = _page_query(client, params, limit, delay, ramo)
+    log.info("Ramo '%s': %d contratos%s",
+             ramo, len(out), "  [TRUNCADO -> fallback por institución]" if truncado else "")
+    return out, truncado
+
+
+def fetch_ramo_by_institution(client, ramo, instituciones, limit, delay) -> list[dict]:
+    """Fallback: si un ramo se trunca (servidor topado a `limit` e ignorando 'page'),
+    re-consulta partiendo por institución; cada aseguradora+ramo suele caber en <limit."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for inst in instituciones:
+        params = {"sector": SECTOR, "search_type": "advanced",
+                  "ramo": ramo, "institucion": inst}
+        rows, trunc = _page_query(client, params, limit, delay, ramo)
+        for c in rows:
+            key = c["numero_registro"] or f"{ramo}|{inst}|{c['nombre_comercial']}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+        if trunc:
+            log.warning("Ramo '%s' / inst '%s' aún topado a %d (caso raro).",
+                        ramo, inst, limit)
+    log.info("Ramo '%s' por institución: %d contratos.", ramo, len(out))
     return out
 
 
 def scrape_vida(client, limit, delay) -> list[dict]:
     objetivo = vida_ramos(fetch_options(client, "ramos", delay))
     log.info("Ramos de Vida a consultar: %d", len(objetivo))
+    instituciones: list[str] | None = None
     contratos: dict[str, dict] = {}
     anon = 0
     for ramo in objetivo:
-        for c in fetch_ramo(client, ramo, limit, delay):
+        rows, truncado = fetch_ramo(client, ramo, limit, delay)
+        if truncado:
+            if instituciones is None:
+                instituciones = fetch_options(client, "instituciones", delay)
+            rows = fetch_ramo_by_institution(client, ramo, instituciones, limit, delay)
+        for c in rows:
             key = c["numero_registro"]
             if not key:
                 key, anon = f"__anon_{anon}", anon + 1
