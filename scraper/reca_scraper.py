@@ -190,8 +190,14 @@ def fetch_options(client, tipo, delay) -> list[str]:
     return [item["id"] for item in data.get("data", [])]
 
 
+def ramos_filter(all_ramos: list[str], keywords: list[str]) -> list[str]:
+    """Ramos cuyo nombre contiene alguna de las palabras clave (sin acentos)."""
+    kws = [normalize(k) for k in keywords]
+    return [r for r in all_ramos if any(k in normalize(r) for k in kws)]
+
+
 def vida_ramos(all_ramos: list[str]) -> list[str]:
-    return [r for r in all_ramos if "vida" in normalize(r)]
+    return ramos_filter(all_ramos, ["vida"])
 
 
 def row_to_contract(row: list, ramo_consulta: str) -> dict:
@@ -296,9 +302,10 @@ def fetch_ramo_by_institution(client, ramo, instituciones, limit, delay) -> list
     return out
 
 
-def scrape_vida(client, limit, delay) -> list[dict]:
-    objetivo = vida_ramos(fetch_options(client, "ramos", delay))
-    log.info("Ramos de Vida a consultar: %d", len(objetivo))
+def scrape_vida(client, limit, delay, ramo_keywords=("vida",)) -> list[dict]:
+    objetivo = ramos_filter(fetch_options(client, "ramos", delay), list(ramo_keywords))
+    log.info("Ramos a consultar (keywords=%s): %d",
+             ",".join(ramo_keywords), len(objetivo))
     instituciones: list[str] | None = None
     contratos: dict[str, dict] = {}
     anon = 0
@@ -471,6 +478,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=100, help="Tamaño de página (<=100).")
     ap.add_argument("--delay", type=float, default=1.5, help="Segundos entre requests.")
     ap.add_argument("--out", default="output", help="Carpeta de salida.")
+    ap.add_argument("--ramo-keywords", default="vida",
+                    help='Palabras clave de ramo a incluir (coma). Default "vida". '
+                         'Ej: "vida,accidentes,escolar" para ampliar el universo.')
     ap.add_argument("--enrich", choices=["none", "match", "all"], default="none",
                     help="Pedir la tarjeta para añadir estatus/CNSF/documentos.")
     ap.add_argument("--pdfs", action="store_true",
@@ -503,8 +513,9 @@ def main() -> None:
     log.info("Scraper RECAS/Vida | limit=%d delay=%.1fs enrich=%s pdfs=%s scope=%s",
              args.limit, args.delay, enrich, args.pdfs, args.pdf_scope)
 
+    ramo_keywords = [k.strip() for k in args.ramo_keywords.split(",") if k.strip()]
     with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
-        contratos = scrape_vida(client, args.limit, args.delay)
+        contratos = scrape_vida(client, args.limit, args.delay, ramo_keywords)
         if not contratos:
             log.error("No se obtuvieron contratos. Revisa el log.")
             sys.exit(1)

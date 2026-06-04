@@ -28,26 +28,35 @@ import shutil
 import unicodedata
 from pathlib import Path
 
-# Términos de CONTENIDO con (peso, categoría). La categoría 'edu' es la que de
-# verdad indica competencia con Ceiba (orfandad / continuidad educativa); las
-# otras ('deudor', 'ahorro', 'generic') se reportan pero NO inflan el edu_score.
+# Ceiba = PROTECCIÓN PURA de continuidad de colegiatura / orfandad (vida a término;
+# si el padre que paga fallece, se paga la colegiatura a la ESCUELA). Por eso:
+#   - categoría 'competidor' = orfandad / colegiatura / continuidad / escuela-beneficiaria.
+#   - categoría 'ahorro_edu' = seguros educativos de AHORRO/dotal -> NO compiten con Ceiba.
+#   - 'deudor'/'generic' = contexto.
+# term -> (peso, categoría).
 DEFAULT_TERMS = {
-    # --- orfandad / continuidad educativa (lo central para Ceiba) ---
-    "orfandad": (6, "edu"), "huerfan": (6, "edu"),
-    "renta educativa": (6, "edu"), "continuidad de estudios": (6, "edu"),
-    "continuidad educativa": (6, "edu"), "ayuda para educacion": (5, "edu"),
-    "ayuda educativa": (5, "edu"), "meta educacional": (5, "edu"),
-    "educacion profesional": (4, "edu"), "plazo de pago educativo": (4, "edu"),
-    "gastos educativos": (4, "edu"), "gasto educativo": (4, "edu"),
-    "colegiatura": (4, "edu"), "beca": (4, "edu"), "becari": (4, "edu"),
-    "seguro educativo": (4, "edu"), "escolar": (3, "edu"),
-    "estudiantil": (3, "edu"), "educativ": (2, "edu"), "dotal": (2, "edu"),
-    "educac": (1, "edu"),   # peso bajo: aparece en "Secretaría de Educación Pública"
-    # --- contexto: otros segmentos (no son competencia de orfandad) ---
+    # --- competidor directo: orfandad / continuidad de colegiatura (protección) ---
+    "orfandad": (6, "competidor"), "huerfan": (6, "competidor"),
+    "continuidad de estudios": (6, "competidor"),
+    "continuidad educativa": (6, "competidor"),
+    "colegiatura": (5, "competidor"), "colegiaturas": (5, "competidor"),
+    "institucion educativa": (5, "competidor"), "plantel": (4, "competidor"),
+    "ciclo escolar": (4, "competidor"), "matricula": (3, "competidor"),
+    "ayuda para educacion": (4, "competidor"), "ayuda educativa": (4, "competidor"),
+    "gastos educativos": (3, "competidor"), "beca": (3, "competidor"),
+    "becari": (3, "competidor"), "escuela": (3, "competidor"),
+    "colegio": (3, "competidor"), "escolar": (2, "competidor"),
+    "estudiantil": (2, "competidor"), "inscripcion": (1, "competidor"),
+    # --- seguro educativo de AHORRO (NO compite con Ceiba) -> bandera ---
+    "dotal": (2, "ahorro_edu"), "meta educacional": (2, "ahorro_edu"),
+    "valor en efectivo": (1, "ahorro_edu"), "primas programadas": (1, "ahorro_edu"),
+    "supervivencia": (1, "ahorro_edu"), "ahorro": (1, "ahorro_edu"),
+    "educacion profesional": (1, "ahorro_edu"),
+    # --- contexto ---
     "deudor": (1, "deudor"),
-    "supervivencia": (1, "ahorro"), "ahorro": (1, "ahorro"),
-    "menores": (1, "generic"), "hijos": (1, "generic"),
+    "educac": (1, "generic"), "menores": (1, "generic"), "hijos": (1, "generic"),
 }
+CATS = ("competidor", "ahorro_edu", "deudor", "generic")
 
 
 def normalize(text: str) -> str:
@@ -90,8 +99,8 @@ def main() -> None:
     ap.add_argument("--out-csv", default="pdf_scores.csv")
     ap.add_argument("--shortlist", default="pdfs_shortlist")
     ap.add_argument("--min-score", type=int, default=1,
-                    help="Score mínimo para entrar al shortlist (default 1).")
-    ap.add_argument("--pages", type=int, default=30, help="Páginas a leer por PDF.")
+                    help="competidor_score mínimo para el shortlist (default 1).")
+    ap.add_argument("--pages", type=int, default=60, help="Páginas a leer por PDF.")
     ap.add_argument("--terms", default="", help="Override de términos (coma).")
     ap.add_argument("--no-zip", action="store_true")
     args = ap.parse_args()
@@ -100,9 +109,9 @@ def main() -> None:
     if not pdfs_dir.exists():
         raise SystemExit(f"No encuentro {pdfs_dir}.")
 
-    # term -> (peso, categoria). Con --terms, todos entran como categoría 'edu'.
+    # term -> (peso, categoria). Con --terms, todos entran como 'competidor'.
     if args.terms.strip():
-        terms = {normalize(t): (1, "edu") for t in args.terms.split(",") if t.strip()}
+        terms = {normalize(t): (1, "competidor") for t in args.terms.split(",") if t.strip()}
     else:
         terms = {normalize(k): v for k, v in DEFAULT_TERMS.items()}
 
@@ -114,58 +123,54 @@ def main() -> None:
         numreg = path.parent.name
         institucion = path.parent.parent.name
         text = normalize(extract_text(path, args.pages))
-        # Ruido: "educación pública" / "secretaría de educación" no es cobertura educativa.
-        noise = sum(text.count(p) for p in (
-            "educacion publica", "secretaria de educacion",
-            "direccion general de profesiones"))
-        cat_score = {"edu": 0, "deudor": 0, "ahorro": 0, "generic": 0}
-        edu_hits, ctx_hits, snippet = [], [], ""
+        cat_score = {c: 0 for c in CATS}
+        comp_hits, otros_hits, snippet = [], [], ""
         for term, (weight, cat) in terms.items():
             n = text.count(term)
-            if term == "educac":
-                n = max(0, n - noise)   # descuenta menciones a la SEP
             if not n:
                 continue
             cat_score[cat] += n * weight
-            (edu_hits if cat == "edu" else ctx_hits).append(f"{term}({n})")
-            if cat == "edu" and not snippet:
+            (comp_hits if cat == "competidor" else otros_hits).append(f"{term}({n})")
+            if cat == "competidor" and not snippet:
                 pos = text.find(term)
-                snippet = text[max(0, pos - 60): pos + 90].strip()
+                snippet = text[max(0, pos - 70): pos + 100].strip()
         rows.append({
             "institucion": institucion,
             "numero_registro": numreg,
             "archivo": path.name,
-            "edu_score": cat_score["edu"],
+            "competidor_score": cat_score["competidor"],
+            "ahorro_edu_score": cat_score["ahorro_edu"],
             "deudor_score": cat_score["deudor"],
-            "ahorro_score": cat_score["ahorro"],
-            "terminos_edu": "; ".join(edu_hits),
-            "terminos_contexto": "; ".join(ctx_hits),
+            "terminos_competidor": "; ".join(comp_hits),
+            "terminos_otros": "; ".join(otros_hits),
             "fragmento": snippet,
             "_path": path,
         })
         if i % 25 == 0:
             print(f"  {i}/{len(files)}")
 
-    # Ordena por relevancia educativa (lo que compite con Ceiba), luego deudor.
-    rows.sort(key=lambda r: (r["edu_score"], r["deudor_score"]), reverse=True)
-    fields = ["institucion", "numero_registro", "archivo", "edu_score",
-              "deudor_score", "ahorro_score", "terminos_edu",
-              "terminos_contexto", "fragmento"]
+    # Ordena por señal de COMPETIDOR (orfandad/colegiatura); a igualdad, menos ahorro.
+    rows.sort(key=lambda r: (r["competidor_score"], -r["ahorro_edu_score"]), reverse=True)
+    fields = ["institucion", "numero_registro", "archivo", "competidor_score",
+              "ahorro_edu_score", "deudor_score", "terminos_competidor",
+              "terminos_otros", "fragmento"]
     with open(args.out_csv, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         for r in rows:
             w.writerow({k: r[k] for k in fields})
 
-    con_score = [r for r in rows if r["edu_score"] >= args.min_score]
+    con_score = [r for r in rows if r["competidor_score"] >= args.min_score]
     print(f"\nRanking -> {args.out_csv}")
-    print(f"Con edu_score >= {args.min_score}: {len(con_score)} PDFs")
-    print("\nTop 20 por relevancia educativa:")
+    print(f"Con competidor_score >= {args.min_score}: {len(con_score)} PDFs")
+    print("\nTop 20 por señal de competidor (orfandad/colegiatura, protección):")
     for r in rows[:20]:
-        if r["edu_score"] == 0:
+        if r["competidor_score"] == 0:
             break
-        print(f"  edu={r['edu_score']:3d}  {r['numero_registro']:20}  "
-              f"{r['institucion'][:28]:28}  {r['terminos_edu'][:55]}")
+        flag = "  (¿AHORRO?)" if r["ahorro_edu_score"] >= r["competidor_score"] else ""
+        print(f"  comp={r['competidor_score']:3d} ahorro={r['ahorro_edu_score']:3d}  "
+              f"{r['numero_registro']:18}  {r['institucion'][:24]:24}  "
+              f"{r['terminos_competidor'][:45]}{flag}")
 
     # Copia el shortlist + zip
     short = Path(args.shortlist)
