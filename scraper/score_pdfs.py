@@ -28,12 +28,25 @@ import shutil
 import unicodedata
 from pathlib import Path
 
-# Términos de CONTENIDO (normalizados, sin acentos). Peso por relevancia para Ceiba.
+# Términos de CONTENIDO con (peso, categoría). La categoría 'edu' es la que de
+# verdad indica competencia con Ceiba (orfandad / continuidad educativa); las
+# otras ('deudor', 'ahorro', 'generic') se reportan pero NO inflan el edu_score.
 DEFAULT_TERMS = {
-    "orfandad": 5, "huerfan": 5, "renta educativa": 5, "beca": 3, "becari": 3,
-    "colegiatura": 4, "continuidad de estudios": 5, "continuidad educativa": 5,
-    "gastos de educacion": 4, "educac": 2, "escolar": 3, "estudiantil": 3,
-    "supervivencia": 3, "menores": 1, "hijos": 1, "deudor": 1,
+    # --- orfandad / continuidad educativa (lo central para Ceiba) ---
+    "orfandad": (6, "edu"), "huerfan": (6, "edu"),
+    "renta educativa": (6, "edu"), "continuidad de estudios": (6, "edu"),
+    "continuidad educativa": (6, "edu"), "ayuda para educacion": (5, "edu"),
+    "ayuda educativa": (5, "edu"), "meta educacional": (5, "edu"),
+    "educacion profesional": (4, "edu"), "plazo de pago educativo": (4, "edu"),
+    "gastos educativos": (4, "edu"), "gasto educativo": (4, "edu"),
+    "colegiatura": (4, "edu"), "beca": (4, "edu"), "becari": (4, "edu"),
+    "seguro educativo": (4, "edu"), "escolar": (3, "edu"),
+    "estudiantil": (3, "edu"), "educativ": (2, "edu"), "dotal": (2, "edu"),
+    "educac": (1, "edu"),   # peso bajo: aparece en "Secretaría de Educación Pública"
+    # --- contexto: otros segmentos (no son competencia de orfandad) ---
+    "deudor": (1, "deudor"),
+    "supervivencia": (1, "ahorro"), "ahorro": (1, "ahorro"),
+    "menores": (1, "generic"), "hijos": (1, "generic"),
 }
 
 
@@ -87,8 +100,9 @@ def main() -> None:
     if not pdfs_dir.exists():
         raise SystemExit(f"No encuentro {pdfs_dir}.")
 
+    # term -> (peso, categoria). Con --terms, todos entran como categoría 'edu'.
     if args.terms.strip():
-        terms = {normalize(t): 1 for t in args.terms.split(",") if t.strip()}
+        terms = {normalize(t): (1, "edu") for t in args.terms.split(",") if t.strip()}
     else:
         terms = {normalize(k): v for k, v in DEFAULT_TERMS.items()}
 
@@ -100,42 +114,58 @@ def main() -> None:
         numreg = path.parent.name
         institucion = path.parent.parent.name
         text = normalize(extract_text(path, args.pages))
-        score, hits, snippet = 0, [], ""
-        for term, weight in terms.items():
+        # Ruido: "educación pública" / "secretaría de educación" no es cobertura educativa.
+        noise = sum(text.count(p) for p in (
+            "educacion publica", "secretaria de educacion",
+            "direccion general de profesiones"))
+        cat_score = {"edu": 0, "deudor": 0, "ahorro": 0, "generic": 0}
+        edu_hits, ctx_hits, snippet = [], [], ""
+        for term, (weight, cat) in terms.items():
             n = text.count(term)
-            if n:
-                score += n * weight
-                hits.append(f"{term}({n})")
-                if not snippet:
-                    pos = text.find(term)
-                    snippet = text[max(0, pos - 60): pos + 80].strip()
+            if term == "educac":
+                n = max(0, n - noise)   # descuenta menciones a la SEP
+            if not n:
+                continue
+            cat_score[cat] += n * weight
+            (edu_hits if cat == "edu" else ctx_hits).append(f"{term}({n})")
+            if cat == "edu" and not snippet:
+                pos = text.find(term)
+                snippet = text[max(0, pos - 60): pos + 90].strip()
         rows.append({
             "institucion": institucion,
             "numero_registro": numreg,
             "archivo": path.name,
-            "score": score,
-            "terminos": "; ".join(hits),
+            "edu_score": cat_score["edu"],
+            "deudor_score": cat_score["deudor"],
+            "ahorro_score": cat_score["ahorro"],
+            "terminos_edu": "; ".join(edu_hits),
+            "terminos_contexto": "; ".join(ctx_hits),
             "fragmento": snippet,
             "_path": path,
         })
         if i % 25 == 0:
             print(f"  {i}/{len(files)}")
 
-    rows.sort(key=lambda r: r["score"], reverse=True)
+    # Ordena por relevancia educativa (lo que compite con Ceiba), luego deudor.
+    rows.sort(key=lambda r: (r["edu_score"], r["deudor_score"]), reverse=True)
+    fields = ["institucion", "numero_registro", "archivo", "edu_score",
+              "deudor_score", "ahorro_score", "terminos_edu",
+              "terminos_contexto", "fragmento"]
     with open(args.out_csv, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["institucion", "numero_registro", "archivo",
-                                          "score", "terminos", "fragmento"])
+        w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         for r in rows:
-            w.writerow({k: r[k] for k in w.fieldnames})
+            w.writerow({k: r[k] for k in fields})
 
-    con_score = [r for r in rows if r["score"] >= args.min_score]
+    con_score = [r for r in rows if r["edu_score"] >= args.min_score]
     print(f"\nRanking -> {args.out_csv}")
-    print(f"Con score >= {args.min_score}: {len(con_score)} PDFs")
-    print("\nTop 15:")
-    for r in rows[:15]:
-        print(f"  {r['score']:4d}  {r['numero_registro']:20}  "
-              f"{r['institucion'][:30]:30}  {r['terminos'][:60]}")
+    print(f"Con edu_score >= {args.min_score}: {len(con_score)} PDFs")
+    print("\nTop 20 por relevancia educativa:")
+    for r in rows[:20]:
+        if r["edu_score"] == 0:
+            break
+        print(f"  edu={r['edu_score']:3d}  {r['numero_registro']:20}  "
+              f"{r['institucion'][:28]:28}  {r['terminos_edu'][:55]}")
 
     # Copia el shortlist + zip
     short = Path(args.shortlist)
