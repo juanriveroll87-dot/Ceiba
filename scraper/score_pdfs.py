@@ -123,10 +123,17 @@ def main() -> None:
         numreg = path.parent.name
         institucion = path.parent.parent.name
         text = normalize(extract_text(path, args.pages))
+        # Ruido = recital legal LISF de fines del vida grupo (no es cobertura real):
+        # "...pago de la inscripcion o colegiaturas, en el caso de seguros escolares
+        #  o educacionales...". Se descuenta de colegiatura/escolar/inscripcion.
+        boiler = (text.count("seguros escolares o educacionales")
+                  + text.count("inscripcion o colegiaturas"))
         cat_score = {c: 0 for c in CATS}
         comp_hits, otros_hits, snippet = [], [], ""
         for term, (weight, cat) in terms.items():
             n = text.count(term)
+            if term in ("colegiatura", "colegiaturas", "escolar", "inscripcion"):
+                n = max(0, n - boiler)   # quita el recital legal
             if not n:
                 continue
             cat_score[cat] += n * weight
