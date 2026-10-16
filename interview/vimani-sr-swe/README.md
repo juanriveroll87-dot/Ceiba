@@ -13,10 +13,13 @@ vimani-sr-swe/
 │   ├── budget.py              starter skeleton
 │   ├── test_budget.py         11 visible tests
 │   └── review_snippet.py      Part 4: AI cost-code classifier to review
-└── interviewer/               ← never share
+├── interviewer/               ← never share
     ├── budget.py              reference solution
     ├── test_hidden.py         26 hidden edge-case + scale tests
-    └── check.sh               ./check.sh path/to/candidate/budget.py
+│   └── check.sh               ./check.sh path/to/candidate/budget.py
+└── architecture/              ← round-2 system design reference (never share)
+    ├── AI_COORDINATION.md     how the LLM coordinates field actors, with worked examples
+    └── prototype/             runnable demo + 17 guardrail tests (python demo.py)
 ```
 
 > The job posting says product details are shared during the interview.
@@ -238,6 +241,15 @@ team works, but ask for a short `NOTES.md`: trade-offs, which tests they added,
 and *where they did and didn't trust an AI tool, and why.* Then hold a
 45-minute follow-up: a walkthrough, one live change (extension 1 or 2), and the
 hidden-test results. Well-structured code absorbs the live change easily.
+
+## Round 2: system design (finalists, 45–60 min)
+
+Use the defective-delivery prompt at the end of
+[`architecture/AI_COORDINATION.md`](architecture/AI_COORDINATION.md). That
+document is the reference answer. It tests the part of the job the coding
+exercise can't: deciding where the LLM goes in a system where *a wrong
+number costs money*, and coordinating several roles (warehouse, residente,
+compras, supplier, treasury, DRO) from one field signal.
 
 ## Calibration tips
 
