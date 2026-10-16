@@ -90,7 +90,7 @@ Good candidates ask about these. Answers to give if asked:
 - Filter cancelled jobs out at planning time instead of deleting them, so the
   ids stay reserved and history is kept.
 
-See `interviewer/scheduler.py` for the full implementation (~170 lines).
+See `interviewer/scheduler.py` for the full implementation (~215 lines).
 
 ## Hints ladder
 
