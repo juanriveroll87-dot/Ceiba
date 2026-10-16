@@ -1,34 +1,46 @@
 """Part 4: Code review.
 
-A teammate opened a PR with the helper below. It's used by several services to
-call a hosted LLM. It passes their manual testing. Review it as you would a
-real pull request.
+Part of the AI layer: when a residente submits a purchase requisition from the
+field, an LLM suggests a cost code for each line so they don't have to search
+the catalog by hand. A teammate opened this PR and says it "works on the demo
+project". Review it as you would a real pull request.
 """
 
-import time
+import json
 
-stats = {"calls": 0, "errors": 0}
+MISC_CODE = "99.99"
+
+_cache = {}
 
 
-def call_model(client, model, prompt, api_key, retries=3, cache={}):
-    key = model + prompt
-    if key in cache:
-        return cache[key]
+def classify_requisition_lines(llm, lines, catalog_codes):
+    """lines: [{"id": ..., "description": ..., "quantity": ..., "amount": ...}]"""
+    results = []
+    for line in lines:
+        if line["description"] in _cache:
+            results.append(_cache[line["description"]])
+            continue
 
-    for i in range(retries):
+        prompt = (
+            "You are a construction cost expert. Pick the best cost code for "
+            "this item and answer as JSON {\"code\": ..., \"confidence\": ...}.\n"
+            "Item: " + line["description"] + "\n"
+            "Codes: " + str(catalog_codes)
+        )
         try:
-            stats["calls"] += 1
-            print("calling " + model + " with key " + api_key)
-            resp = client.complete(model=model, prompt=prompt, api_key=api_key)
-            if resp.status == 200:
-                result = resp.json()["choices"][0]["text"]
-                cache[key] = result
-                return result
-            else:
-                stats["errors"] += 1
-                cache[key] = None
+            answer = json.loads(llm.complete(prompt))
+            code = answer["code"]
+            confidence = float(answer.get("confidence", 1.0))
         except:
-            stats["errors"] += 1
-            time.sleep(2 ** i)
-        if i == retries:
-            return "error"
+            code = MISC_CODE
+            confidence = 1.0
+
+        if confidence > 0.3:
+            line["cost_code"] = code
+        else:
+            line["cost_code"] = MISC_CODE
+        line["amount"] = float(line["amount"])
+
+        _cache[line["description"]] = line
+        results.append(line)
+    return results
