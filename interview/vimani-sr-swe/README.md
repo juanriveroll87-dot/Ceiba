@@ -14,8 +14,8 @@ vimani-sr-swe/
 │   ├── test_budget.py         11 visible tests
 │   └── review_snippet.py      Part 4: AI cost-code classifier to review
 ├── interviewer/               ← never share
-    ├── budget.py              reference solution
-    ├── test_hidden.py         26 hidden edge-case + scale tests
+│   ├── budget.py              reference solution
+│   ├── test_hidden.py         26 hidden edge-case + scale tests
 │   └── check.sh               ./check.sh path/to/candidate/budget.py
 └── architecture/              ← round-2 system design reference (never share)
     ├── AI_COORDINATION.md     how the LLM coordinates field actors, with worked examples
